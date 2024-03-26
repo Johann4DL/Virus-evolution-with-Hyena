@@ -11,28 +11,32 @@ import wandb
 from tqdm.auto import tqdm
 
 from hyena_simp import Config, HyenaConfig, AuthenticHyenaBlock, FastaModel
-from utils import read_fasta, count_parameters
+from utils import count_parameters, read, train
 from config import hyena_config
 
 
 # load data
+split = 4500
+#path = './data/all_genomes.fasta'
+path = './data/data_splits/2023_2024_genomes_{}.fasta'.format(split)
 
-file_name = './data/British_Columbia/BC_Jan_2023/gisaid_auspice_input_hcov-19_2024_02_01_22/1706826790587.sequences.fasta'
+data = read(path)
+# selsct the first 2250 sequences
+#data = data[0:2250]
+print('Number of genome sequences: ',len(data))
 
-data = read_fasta(file_name)
+# preprocessing
+# CONTEXT_LENGTH = max([len(x) for x in data])
+CONTEXT_LENGTH = 30000
 
-CONTEXT_LENGTH = max([len(x) for x in data])
-
-min_length = min([len(x) for x in data])
-max_length = max([len(x) for x in data])
-
-print('Min and max length of genome sequences before padding:\nMin: ', min_length,'\nMax: ', max_length)
-
-# apply 'N' padding to the sequences
-max_length = max([len(x) for x in data])
-
+# cut sequences to CONTEXT_LENGTH
 for i in range(len(data)):
-    data[i] = data[i] + 'N' * (max_length - len(data[i]))
+    if len(data[i]) >= CONTEXT_LENGTH:
+        data[i] = data[i][:CONTEXT_LENGTH]
+# apply 'P' padding to the sequences
+for i in range(len(data)):
+    data[i] = data[i] + 'P' * (CONTEXT_LENGTH - len(data[i]))
+
 
 min_length = min([len(x) for x in data])
 max_length = max([len(x) for x in data])
@@ -47,6 +51,7 @@ for genome in data:
     for char in genome:
         chars.add(char)
 vocabulary = list(chars)
+
 
 tok2id = {ch: i for i, ch in enumerate(vocabulary)}
 id2tok = {i: ch for i, ch in enumerate(vocabulary)}
@@ -85,13 +90,12 @@ val_loader = DataLoader(val_ds, batch_size=hyena_config.batch_size, shuffle=True
 
 model = FastaModel(hyena_config, AuthenticHyenaBlock)
 m = model.to('cuda')
-optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
 
 
 print(f'The model has {count_parameters(model):,} trainable parameters')
 
 # wandb
-
 # wandb.init(
 #     # set the wandb project where this run will be logged
 #     project="Hyena_Covid",
@@ -103,29 +107,20 @@ print(f'The model has {count_parameters(model):,} trainable parameters')
 #     }
 # )
 
-
 # training loop
 
-for iter in tqdm(range(hyena_config.epochs)):
-    for source in loader:
-        source = source.to('cuda')
-        
-        logits = model(source)
-        loss = torch.nn.functional.cross_entropy(
-            logits.transpose(1, 2), source
-        )
-
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        optimizer.step()
-        print(iter)
-        
-    # wandb.log({"loss": loss.item(),
-    #             "epoch": iter+1,
-    #             "learning_rate": optimizer.param_groups[0]['lr'],
-    #             "batch_size": hyena_config.batch_size,})
-
+train(model, loader, val_loader, optimizer, hyena_config)  # 1 epoch ~ 180 seconds
 
 # save model
-torch.save(model, 'models/model_scripted.pt')
-# torch.save(model.state_dict(), 'model_scripted_SD.pt')
+torch.save(model.state_dict(), 'models/model_state_dict_{}.pt'.format(split))
+
+# write val data to file
+with open('val_data.txt', 'w') as f:
+    for item in val_data:
+        f.write("%s\n" % item)
+
+# append val_data.txt to all_val_data.txt
+with open('all_val_data.txt', 'a') as f:
+    for item in val_data:
+        f.write("%s\n" % item)
+# torch.save(model, 'models/model_1.pt')

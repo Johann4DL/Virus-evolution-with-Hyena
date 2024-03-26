@@ -1,6 +1,8 @@
 from torch.utils.data import DataLoader
 from typing import List, Optional, Tuple 
 
+CONTEXT_LENGTH = 30000
+
 import torch
 import torch.nn as nn
 import dataclasses
@@ -238,13 +240,13 @@ class FastaModel(nn.Module):
                         ])
         # reduce dimensionality to get embeddings
         self.down = torch.nn.Linear(
-            29660,
+            CONTEXT_LENGTH, #29660,
             config.embedding_dim,
             bias=False
         )
         self.up = torch.nn.Linear(
             config.embedding_dim,
-            29660,
+            CONTEXT_LENGTH, #29660,
             bias=False
         )
         
@@ -264,17 +266,17 @@ class FastaModel(nn.Module):
         x = self.dropout(token_embeddings + position_embeddings)  # torch.Size([1, 29660, 386])
         x = self.layers(x)  #torch.Size([1, 29660, 386])
         x = torch.transpose(x, 1, 2)  # torch.Size([1, 386, 29660])
-        x = self.down(x) # torch.Size([1, 386, 100])
-        if embed==True:
-            return x  # returns embeddings during inference
-        else:
-            x = self.up(x)
-            x = torch.transpose(x, 1, 2)
+        genome_embedding = self.down(x) # torch.Size([1, 386, 100])
+        # if embed==True:
+        #     return x  # returns embeddings during inference
+        # else:
+        x = self.up(genome_embedding)
+        x = torch.transpose(x, 1, 2)
 
-            x = self.lnorm(x) # torch.Size([1, 29660, 386])
-            logits = self.head(x)  # torch.Size([1, 29660, 13])
+        x = self.lnorm(x) # torch.Size([1, 29660, 386])
+        logits = self.head(x)  # torch.Size([1, 29660, 13])
 
-            return logits
+        return logits, genome_embedding
   
 
 # class FastaModel(nn.Module):
